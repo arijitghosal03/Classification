@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Email Spam Classifier</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        .container { max-width: 800px; }
+        .result-card { margin-top: 20px; }
+        #performance-plot { max-width: 100%; margin-top: 20px; }
+        .file-upload { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Email Spam Classifier</h1>
+        
+        <!-- File Upload Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Upload Training Data</h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <p class="mb-0">Please upload a CSV file with two columns:</p>
+                    <ul>
+                        <li>First column: label (e.g., 'spam' or 'ham')</li>
+                        <li>Second column: email text</li>
+                    </ul>
+                </div>
+                <div class="file-upload">
+                    <input type="file" class="form-control" id="csvFile" accept=".csv">
+                </div>
+                <div id="uploadStatus"></div>
+            </div>
+        </div>
+        
+        <!-- Model Training Section -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Train Models</h5>
+            </div>
+            <div class="card-body">
+                <button id="trainModels" class="btn btn-primary">Train All Models</button>
+                <div id="trainingResults" class="mt-3"></div>
+                <img id="performance-plot" class="d-none">
+            </div>
+        </div>
+
+        <!-- Email Classification Section -->
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">Classify Email</h5>
+            </div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="modelSelect" class="form-label">Select Model:</label>
+                    <select class="form-select" id="modelSelect">
+                        <option value="naive_bayes">Naive Bayes</option>
+                        <option value="svm">Support Vector Machine</option>
+                        <option value="random_forest">Random Forest</option>
+                        <option value="logistic_regression">Logistic Regression</option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label for="emailText" class="form-label">Email Text:</label>
+                    <textarea class="form-control" id="emailText" rows="4"></textarea>
+                </div>
+                <button id="classify" class="btn btn-success">Classify</button>
+                <div id="result" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let fileUploaded = false;
+        
+        // Handle file upload
+        document.getElementById('csvFile').addEventListener('change', async (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    document.getElementById('uploadStatus').innerHTML = `
+                        <div class="alert alert-success mt-3">
+                            File uploaded successfully!<br>
+                            Number of samples: ${data.samples}<br>
+                            Spam ratio: ${data.spam_ratio}
+                        </div>`;
+                    fileUploaded = true;
+                } else {
+                    document.getElementById('uploadStatus').innerHTML = `
+                        <div class="alert alert-danger mt-3">
+                            Error: ${data.error}
+                        </div>`;
+                    fileUploaded = false;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('uploadStatus').innerHTML = `
+                    <div class="alert alert-danger mt-3">
+                        Error uploading file
+                    </div>`;
+                fileUploaded = false;
+            }
+        });
+
+        // Train models and display results
+        document.getElementById('trainModels').addEventListener('click', async () => {
+            if (!fileUploaded) {
+                alert('Please upload a CSV file first');
+                return;
+            }
+            
+            const formData = new FormData();
+            formData.append('file', document.getElementById('csvFile').files[0]);
+            
+            try {
+                const response = await fetch('/train', {
+                    method: 'POST',
+                    body: formData
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    // Display metrics
+                    let resultsHtml = '<h6>Training Results:</h6>';
+                    for (const [model, metrics] of Object.entries(data.results)) {
+                        resultsHtml += `<div class="card result-card">
+                            <div class="card-body">
+                                <h6 class="card-title">${model.replace('_', ' ').toUpperCase()}</h6>
+                                <p class="card-text">
+                                    Accuracy: ${(metrics.accuracy * 100).toFixed(2)}%<br>
+                                    Precision: ${(metrics.precision * 100).toFixed(2)}%<br>
+                                    Recall: ${(metrics.recall * 100).toFixed(2)}%<br>
+                                    F1-Score: ${(metrics.f1 * 100).toFixed(2)}%
+                                </p>
+                            </div>
+                        </div>`;
+                    }
+                    document.getElementById('trainingResults').innerHTML = resultsHtml;
+                    
+                    // Display plot
+                    const plotImg = document.getElementById('performance-plot');
+                    plotImg.src = `data:image/png;base64,${data.plot}`;
+                    plotImg.classList.remove('d-none');
+                } else {
+                    document.getElementById('trainingResults').innerHTML = `
+                        <div class="alert alert-danger">
+                            Error: ${data.error}
+                        </div>`;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error training models');
+            }
+        });
+
+        // Classify email
+        document.getElementById('classify').addEventListener('click', async () => {
+            const text = document.getElementById('emailText').value;
+            const model = document.getElementById('modelSelect').value;
+            
+            if (!text) {
+                alert('Please enter some text to classify');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/predict', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ text, model })
+                });
+                const data = await response.json();
+                
+                if (response.ok) {
+                    const resultDiv = document.getElementById('result');
+                    const resultClass = data.prediction === 'spam' ? 'danger' : 'success';
+                    resultDiv.innerHTML = `
+                        <div class="alert alert-${resultClass}">
+                            This email is classified as: <strong>${data.prediction.toUpperCase()}</strong>
+                            <br>
+                            Model used: ${data.model_used.replace('_', ' ')}
+                        </div>`;
+                } else {
+                    document.getElementById('result').innerHTML = `
+                        <div class="alert alert-danger">
+                            Error: ${data.error}
+                        </div>`;
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                document.getElementById('result').innerHTML = `
+                    <div class="alert alert-danger">
+                        Error classifying email
+                    </div>`;
+            }
+        });
+    </script>
+</body>
+</html>
